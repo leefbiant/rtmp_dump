@@ -1,7 +1,7 @@
 /***********************************************
-Copyright           : 2015 youme.im Inc.
+Copyright           : 2015 Leef Inc.
 Filename            : opus_encode.cpp
-Author              : leef@youme.im
+Author              : bt731001@163.com
 Description         : ---
 Create              : 2019-07-12 23:09:12
 Last Modified       : 2019-07-12 23:09:12
