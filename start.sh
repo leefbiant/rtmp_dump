@@ -1,1 +1,1 @@
-./rtmp_h264_aac rtmp://192.168.0.105:1935/live/111 test.h264 test.aac
+./rtmp_dump rtmp://192.168.0.102:1935/live/111 test.h264 test.aac test.opus

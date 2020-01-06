@@ -13,236 +13,58 @@ int sampleRates [] = {96000,
     88200, 64000, 48000, 44100, 32000,24000,
     22050, 16000, 12000, 11025, 8000, 7350};
 
-
-void le32(unsigned char *p, int v)
-{
-  p[0] = v & 0xff;
-  p[1] = (v >> 8) & 0xff;
-  p[2] = (v >> 16) & 0xff;
-  p[3] = (v >> 24) & 0xff;
-}
-
-/* helper, write a little-endian 16 bit int to memory */
-void le16(unsigned char *p, int v)
-{
-  p[0] = v & 0xff;
-  p[1] = (v >> 8) & 0xff;
-}
-
-ogg_packet *op_opushead(int samplerate, int channels)
-{
-  int size = 19;
-  unsigned char *data = (unsigned char*)malloc(size);
-  ogg_packet *op = (ogg_packet*)malloc(sizeof(*op));
-
-  if (!data) {
-    debug("Couldn't allocate data buffer.\n");
-    free(op);
-    return NULL;
-  }
-  if (!op) {
-    debug("Couldn't allocate Ogg packet.\n");
-    free(data);
-    return NULL;
-  }
-
-  memcpy(data, "OpusHead", 8);  /* identifier */
-  data[8] = 1;                  /* version */
-  data[9] = channels;           /* channels */
-  le16(data+10, 0);             /* pre-skip */
-  le32(data + 12, samplerate);  /* original sample rate */
-  le16(data + 16, 0);           /* gain */
-  data[18] = 0;                 /* channel mapping family */
-
-  op->packet = data;
-  op->bytes = size;
-  op->b_o_s = 1;
-  op->e_o_s = 0;
-  op->granulepos = 0;
-  op->packetno = 0;
-  return op;
-}
-
-ogg_packet *op_opustags(void)
-{
-  const char *identifier = "OpusTags";
-  const char *vendor = "opus rtp packet dump";
-  int size = strlen(identifier) + 4 + strlen(vendor) + 4;
-  unsigned char *data = (unsigned char*)malloc(size);
-  ogg_packet *op = (ogg_packet*)malloc(sizeof(*op));
-
-  if (!data) {
-    debug("Couldn't allocate data buffer.\n");
-    free(op);
-    return NULL;
-  }
-  if (!op) {
-    debug("Couldn't allocate Ogg packet.\n");
-    free(data);
-    return NULL;
-  }
-
-  memcpy(data, identifier, 8);
-  le32(data + 8, strlen(vendor));
-  memcpy(data + 12, vendor, strlen(vendor));
-  le32(data + 12 + strlen(vendor), 0);
-
-  op->packet = data;
-  op->bytes = size;
-  op->b_o_s = 0;
-  op->e_o_s = 0;
-  op->granulepos = 0;
-  op->packetno = 1;
-  return op;
-}
-
-void op_free(ogg_packet *op) {
-  if (op) {
-    if (op->packet) {
-      free(op->packet);
-    }
-    free(op);
-  }
-}
-
-ogg_packet *op_from_pkt(const unsigned char *pkt, int len) {
-  ogg_packet *op = (ogg_packet*)malloc(sizeof(*op));
-  if (!op) {
-    debug("Couldn't allocate Ogg packet.\n");
-    return NULL;
-  }
-
-  op->packet = (unsigned char *)pkt;
-  op->bytes = len;
-  op->b_o_s = 0;
-  op->e_o_s = 0;
-  return op;
-}
-
-int ogg_flush(state *params) {
-  ogg_page page;
-  size_t written;
-
-  if (!params || !params->stream || !params->out) {
-    return -1;
-  }
-
-  while (ogg_stream_flush(params->stream, &page)) {
-    written = fwrite(page.header, 1, page.header_len, params->out);
-    if (written != (size_t)page.header_len) {
-      debug("Error writing Ogg page header\n");
-      return -2;
-    }
-    written = fwrite(page.body, 1, page.body_len, params->out);
-    if (written != (size_t)page.body_len) {
-      debug("Error writing Ogg page body\n");
-      return -3;
-    }
-  }
-
-  return 0;
-}
-
-int ogg_write(state *params) {
-  ogg_page page;
-  size_t written;
-
-  if (!params || !params->stream || !params->out) {
-    return -1;
-  }
-
-  while (ogg_stream_pageout(params->stream, &page)) {
-    written = fwrite(page.header, 1, page.header_len, params->out);
-    if (written != (size_t)page.header_len) {
-      debug("Error writing Ogg page header\n");
-      return -2;
-    }
-    written = fwrite(page.body, 1, page.body_len, params->out);
-    if (written != (size_t)page.body_len) {
-      debug("Error writing Ogg page body\n");
-      return -3;
-    }
-    fflush(params->out);
-  }
-  return 0;
-}
-
 CpcmCodec::CpcmCodec() {
   decoder = NeAACDecOpen();
   m_samplerate = 0;
   m_channels = 0;
-  cache_len = 0;
   m_init = false;
-  m_samplerate_encode = NULL;
+  m_dst_channels = 2;
 }
 
 CpcmCodec::~CpcmCodec() {
   if (decoder) {
     NeAACDecClose(decoder);
   }
-  if (m_samplerate_encode) {
-    src_delete(m_samplerate_encode);
-  }
 }
 
-bool CpcmCodec::Init(unsigned char* data, size_t len) {
+bool CpcmCodec::Init(unsigned char* data, size_t len, int dst_channels) {
   if (m_init) return true;
-  size_t size = FRAME_MAX_LEN;
-  if(get_one_ADTS_frame(data, len, frame, &size) < 0) {
-    LOG(ERROR) <<__func__<< " packet is not acc packet";
-    debug("get_one_ADTS_frame failed");
-    return false;
-  }
-  NeAACDecInit(decoder, frame, size, &m_samplerate, &m_channels);
+  m_dst_channels = dst_channels;
+  NeAACDecInit(decoder, data, len, &m_samplerate, &m_channels);
   m_init = true;
-  debug("init sucess channels:%d samplerate:%d", m_channels, m_samplerate);
-  if (m_samplerate != SAMPLE_RATE) {
-    int err = 0;
-    m_samplerate_encode = src_new(SRC_LINEAR, m_channels, &err);
-    if (!m_samplerate_encode) {
-      debug("src_new faialed err:%d", err);
-    }
-  }
+  debug("init sucess channels:%u samplerate:%lu", m_channels, m_samplerate);
   return true;
 }
 
-int CpcmCodec::CDecDecode(unsigned char* data, size_t len) {
+
+int CpcmCodec::CDecDecode(Packet* packet) {
   if (!m_init) {
-    if (!Init(data, len)) {
+    if (!Init((unsigned char*)packet->len, packet->len)) {
       debug("init failed");
       return -1;
     }
   }
-  if (cache_len + len > FRAME_MAX_LEN * 2) {
-    LOG(ERROR) <<__func__<< " buff is full";
-    debug("buff is null cache len:%d input len:%d", cache_len, len);
-    // return -9;
-  } else {
-    memcpy(buffer + cache_len, data, len);
-    cache_len += len;
-  }
 
-  unsigned char* input_data = buffer;
-  size_t data_size = cache_len;
-  size_t size = FRAME_MAX_LEN;
-  size_t decode_len = 0;
+  // check adts ????
 
-  while (get_one_ADTS_frame(input_data, data_size, frame, &size) == 0) {
-    unsigned char *pcm_data = (unsigned char *)NeAACDecDecode(decoder, &frame_info, frame, size);
-    if (frame_info.error == 0 && pcm_data && frame_info.samples > 0) {
-      uint32_t pcm_len = frame_info.samples * frame_info.channels;
-      Packet *packet = new Packet;
-      // 重采样
-      if (m_samplerate_encode) {
-      //if (0) {
-      static float in[8192] = {0};
-      static float out[8192] = {0};
-      for (uint32_t j = 0; j < pcm_len; j++) {
-        in[j] = pcm_data[j];
-      }
-
+  m_aac_queue.SetObject(packet);
+  while (0 == m_aac_queue.GetObject(&packet) && packet) {
+    unsigned char *pcm_data = (unsigned char *)NeAACDecDecode(decoder, &frame_info, (unsigned char*)packet->data, packet->len);
+    delete packet;
+    if (frame_info.error != 0 || !pcm_data || frame_info.samples <= 0) {
+      debug("error packet");
+      continue;
+    }
+    uint32_t pcm_len = frame_info.samples * frame_info.channels;
+    packet = new Packet;
+    // 重采样
+    if (m_samplerate != SAMPLE_RATE) {
+      static float in[4096] = {0};
+      static float out[4096] = {0};
+      src_short_to_float_array((short *)pcm_data, in, pcm_len / sizeof(short));
       static char sample_buff[16 * 1024] = {0};
       SRC_DATA src_data;
+      memset(&src_data, 0x00, sizeof(SRC_DATA));
       src_data.src_ratio = 1.0 * SAMPLE_RATE / m_samplerate;
       src_data.end_of_input = 0;
       src_data.input_frames = frame_info.samples;
@@ -250,49 +72,34 @@ int CpcmCodec::CDecDecode(unsigned char* data, size_t len) {
       src_data.data_in = in;
       src_data.data_out = out;
       int error = 0;
-      do {
-        if ((error = src_simple(&src_data, SRC_ZERO_ORDER_HOLD, frame_info.channels))) {
-          debug("src_simple err:%s", src_strerror(error));
+      do  {
+        if ((error = src_simple(&src_data, SRC_ZERO_ORDER_HOLD, frame_info.channels)))  {
+          debug("src_simple err frae_info.channels:%d : %s", frame_info.channels, src_strerror(error));
+          delete packet;
           break;
         }
-        // debug("src_simple sucess inlen:%d out len:%d src_ratio:%2f", pcm_len, src_data.output_frames_gen * frame_info.channels, src_data.src_ratio);
         uint32_t pcm_sample_len = src_data.output_frames_gen * frame_info.channels;
-        if(frame_info.channels == 2) {
-          int i = 0;
-           for (uint32_t j = 0; j < pcm_sample_len; j += 4) {
-              sample_buff[i++] = out[j];
-              sample_buff[i++] = out[j+1];
-           }
-           pcm_sample_len /= 2;
-
-         } else {
-           memcpy(sample_buff, out, pcm_sample_len);
-         }
-        // packet->len = src_data.output_frames_gen * frame_info.channels;
-        packet->len = pcm_sample_len;
-        packet->data = new char[packet->len];
-        memcpy(packet->data, sample_buff, packet->len);
+        src_float_to_short_array(out, (short *)sample_buff, pcm_sample_len);
+        if (frame_info.channels == 2 && m_dst_channels == 1)
+        {
+          short *audio_buff = (short *)sample_buff;
+          for (uint32_t j = 0; j < pcm_sample_len / sizeof(short); ++j)
+          {
+            audio_buff[j] = (audio_buff[2 * j] + audio_buff[2 * j + 1]) >> 1;
+          }
+          pcm_sample_len /= 2;
+        }
+        packet = new Packet(sample_buff, pcm_sample_len);
         m_pcm_queue.SetObject(packet);
-        } while (0);
-      }  else {
-        packet->len = pcm_len;
-        packet->data = new char[packet->len];
-        memcpy(packet->data, pcm_data, packet->len);
-        m_pcm_queue.SetObject(packet);
-      }
+      } while (0);
+    }  else {
+      packet = new Packet((const char*)pcm_data, pcm_len);
+      m_pcm_queue.SetObject(packet);
     }
-    data_size -= size;
-    input_data += size;
-    decode_len += size;
   }
-  if (decode_len > 0) {
-    size_t last_len = cache_len - decode_len;
-    memmove(buffer, buffer + decode_len, last_len);
-    cache_len = last_len;
-  }
-  // debug("cache len:%d queue num:%d", cache_len, m_pcm_queue.GetNum());
   return m_pcm_queue.GetNum();
 }
+
 
 int CpcmCodec::GetPcmPacket(Packet** packet) {
   m_pcm_queue.GetObject(packet);
@@ -301,16 +108,12 @@ int CpcmCodec::GetPcmPacket(Packet** packet) {
 
 CopusEncode::CopusEncode() {
   m_init = false;
-  m_ogg_init = false;
-  m_ogg_file = fopen("test_ogg.opus", "wb");
-  params = NULL;
 }
 
 
 int CopusEncode::Init(int sample_rates, int chan_num) {
   if (m_init) return 0;
-  /// this->m_channels = chan_num ? chan_num : CHANNELS;
-  this->m_channels = 1;
+  this->m_channels = chan_num ? chan_num : CHANNELS;
   // this->m_sample_rates = sample_rates ? sample_rates : SAMPLE_RATE;
   this->m_sample_rates = SAMPLE_RATE;
   this->m_frame_size = FRAME_SIZE;
@@ -341,15 +144,6 @@ CopusEncode::~CopusEncode() {
     delete[] m_pcm_packet;
     m_pcm_packet = NULL;
   }
-  if (m_ogg_file) {
-    fclose(m_ogg_file);
-    m_ogg_file = NULL;
-  }
-  if (params) {
-    ogg_stream_destroy(params->stream);
-    free(params);
-    params = NULL;
-  }
 }
 
 int CopusEncode::packet_set(unsigned char* pcm_bytes, uint32_t pcm_len) {
@@ -369,7 +163,7 @@ int CopusEncode::packet_get() {
 }
 
 
-int CopusEncode::EncodeAAc(unsigned char* pcm_bytes, uint32_t pcm_len) {
+int CopusEncode::EncodeOpus(unsigned char* pcm_bytes, uint32_t pcm_len) {
   if (!m_init) {
     if (0 != Init(0, 0)) {
       debug("not init");
@@ -391,42 +185,9 @@ int CopusEncode::EncodeAAc(unsigned char* pcm_bytes, uint32_t pcm_len) {
       debug("encode failed: %s\n", opus_strerror(nbBytes));
       return -1;
     }
-    Packet *opus_packet = new Packet;
-    opus_packet->len = nbBytes;
-    opus_packet->data = new char[opus_packet->len];
-    memcpy(opus_packet->data, cbits, opus_packet->len);
+    Packet *opus_packet = new Packet((const char*)cbits, nbBytes);
     m_opus_queue.SetObject(opus_packet);
-    // for ogg init
-    do {
-      if (m_ogg_init) break;
-      params = (state*)malloc(sizeof(state));
-      params->stream = (ogg_stream_state*)malloc(sizeof(ogg_stream_state));;
-      params->out = m_ogg_file;
-      params->granulepos = 0;
-      if (ogg_stream_init(params->stream, rand()) < 0) {
-        debug("ogg_stream_init init failed");
-        break;
-      }
-      ogg_packet *op = op_opushead(m_sample_rates, m_channels);
-      ogg_stream_packetin(params->stream, op);
-      op_free(op);
-      op = op_opustags();
-      ogg_stream_packetin(params->stream, op);
-      op_free(op);
-      ogg_flush(params);
-      m_ogg_init = true;
-      debug("ogg init sucess");
-    } while (0);
-    // write packet
-    if (m_ogg_init) {
-      ogg_packet *op = op_from_pkt(cbits, nbBytes);
-      int samples = opus_packet_get_nb_samples(cbits, nbBytes, 48000);
-      if (samples > 0) params->granulepos += samples;
-      op->granulepos = params->granulepos;
-      ogg_stream_packetin(params->stream, op);
-      free(op);
-      ogg_write(params);
-    }
+ 
   }
   // debug("cache len:%d queue num:%d", cache_len, m_opus_queue.GetNum());
   return m_opus_queue.GetNum();

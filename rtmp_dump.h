@@ -9,5 +9,7 @@ Last Modified       : 2019-12-28 23:32:24
 #ifndef RTMP_H264_AAC_H
 #define RTMP_H264_AAC_H
 #include "flvparse.h"
-void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file);
+#include "opus_encode.h"
+#include "ogg_packet.h"
+void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file, const char* opus_file);
 #endif
