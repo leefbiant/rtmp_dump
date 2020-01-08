@@ -11,10 +11,32 @@ Last Modified       : 2020-01-06 15:11:02
 #define UTIL_H_
 
 #include <pthread.h>
+#include <math.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/time.h>
+
+
+inline char* GetCurDateTimeStr() {
+  static char timedatestamp[32] = {0};
+  struct timeval stLogTv;
+  gettimeofday(&stLogTv, NULL);
+  struct tm strc_now = *localtime(&stLogTv.tv_sec);
+  snprintf(timedatestamp, sizeof(timedatestamp) -1, "%04d-%02d-%02d %02d:%02d:%02d:%03ld:%03ld"
+      , strc_now.tm_year + 1900, strc_now.tm_mon + 1, strc_now.tm_mday
+      , strc_now.tm_hour, strc_now.tm_min, strc_now.tm_sec, stLogTv.tv_usec/1000,  stLogTv.tv_usec%1000);
+    return timedatestamp;
+}
 
 #ifndef debug
-#define debug(fmt, args...) fprintf(stderr, "DEBUG: %s:%d:%s(): " fmt "\n", \
-    __FILE__, __LINE__, __func__, ##args)
+#define debug(fmt, args...) \
+do { \
+  const char* time_str = GetCurDateTimeStr(); \
+  fprintf(stderr, "[%s]|%d|%ld(%s:%d:%s):" fmt "\n", \
+    time_str, getpid(),syscall(SYS_gettid), __FILE__, __LINE__, __func__, ##args);\
+} while (0)
 #endif
 
 #define FRAME_MAX_LEN 1024*5

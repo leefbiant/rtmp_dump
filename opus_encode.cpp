@@ -9,9 +9,7 @@ Last Modified       : 2019-07-12 23:09:12
 #include "opus_encode.h"
 #include <math.h>
 
-int sampleRates [] = {96000,
-    88200, 64000, 48000, 44100, 32000,24000,
-    22050, 16000, 12000, 11025, 8000, 7350};
+
 
 CpcmCodec::CpcmCodec() {
   decoder = NeAACDecOpen();
@@ -24,6 +22,13 @@ CpcmCodec::CpcmCodec() {
 CpcmCodec::~CpcmCodec() {
   if (decoder) {
     NeAACDecClose(decoder);
+  }
+  Packet* packet;
+  while (0 == m_aac_queue.GetObject(&packet) && packet) {
+    delete packet;
+  }
+  while (0 == m_pcm_queue.GetObject(&packet) && packet) {
+    delete packet;
   }
 }
 
@@ -39,7 +44,7 @@ bool CpcmCodec::Init(unsigned char* data, size_t len, int dst_channels) {
 
 int CpcmCodec::CDecDecode(Packet* packet) {
   if (!m_init) {
-    if (!Init((unsigned char*)packet->len, packet->len)) {
+    if (!Init((unsigned char*)packet->data, packet->len)) {
       debug("init failed");
       return -1;
     }
@@ -52,11 +57,11 @@ int CpcmCodec::CDecDecode(Packet* packet) {
     unsigned char *pcm_data = (unsigned char *)NeAACDecDecode(decoder, &frame_info, (unsigned char*)packet->data, packet->len);
     delete packet;
     if (frame_info.error != 0 || !pcm_data || frame_info.samples <= 0) {
-      debug("error packet");
+      // debug("error packet");
       continue;
     }
     uint32_t pcm_len = frame_info.samples * frame_info.channels;
-    packet = new Packet;
+    Packet* packet = NULL;
     // 重采样
     if (m_samplerate != SAMPLE_RATE) {
       static float in[4096] = {0};
@@ -75,7 +80,6 @@ int CpcmCodec::CDecDecode(Packet* packet) {
       do  {
         if ((error = src_simple(&src_data, SRC_ZERO_ORDER_HOLD, frame_info.channels)))  {
           debug("src_simple err frae_info.channels:%d : %s", frame_info.channels, src_strerror(error));
-          delete packet;
           break;
         }
         uint32_t pcm_sample_len = src_data.output_frames_gen * frame_info.channels;
@@ -108,6 +112,8 @@ int CpcmCodec::GetPcmPacket(Packet** packet) {
 
 CopusEncode::CopusEncode() {
   m_init = false;
+  m_packet_len = 0;
+  m_cache_len = 0;
 }
 
 
@@ -129,7 +135,7 @@ int CopusEncode::Init(int sample_rates, int chan_num) {
     debug("opus_encoder_ctl failed");
     return -1;
   }
-  m_packet_len = sizeof(short)*m_channels * m_frame_size;
+  m_packet_len = sizeof(short) * m_channels * m_frame_size;
   m_pcm_packet = new unsigned char[m_packet_len];
   m_init = true;
   debug("channels:%d ample_rates:%d, packet_len:%d", m_channels, m_sample_rates, m_packet_len);
@@ -144,6 +150,10 @@ CopusEncode::~CopusEncode() {
     delete[] m_pcm_packet;
     m_pcm_packet = NULL;
   }
+  Packet *packet;
+  while (0 == m_opus_queue.GetObject(&packet) && packet) {
+    delete packet;
+  }
 }
 
 int CopusEncode::packet_set(unsigned char* pcm_bytes, uint32_t pcm_len) {
@@ -154,9 +164,11 @@ int CopusEncode::packet_set(unsigned char* pcm_bytes, uint32_t pcm_len) {
 }
 
 int CopusEncode::packet_get() {
-  if (m_cache_len < m_packet_len) return -1;
+  if (m_cache_len <= 0 || m_packet_len <= 0 || m_cache_len < m_packet_len) return -1;
   memcpy(m_pcm_packet, m_pcm_cache, m_packet_len);
-  memmove(m_pcm_cache, m_pcm_cache+m_packet_len, m_cache_len-m_packet_len);
+  if (m_cache_len > m_packet_len) {
+    memmove(m_pcm_cache, m_pcm_cache+m_packet_len, m_cache_len-m_packet_len);
+  }
   m_cache_len -= m_packet_len;
  // debug("packet_get len:%d last len:%d", m_cache_len, cache_len);
   return m_cache_len;

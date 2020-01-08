@@ -15,7 +15,10 @@ Last Modified       : 2019-12-28 22:59:02
 
 #include "librtmp/rtmp.h"
 #include "librtmp/log.h"
+#include "util.h"
 #include "rtmp_dump.h"
+#include "sps_pps.h"
+#include "mp4_encode.h"
 
 void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file, const char* opus_file) {
 
@@ -60,6 +63,11 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     }
     ADTSContext adts_ctx = {0};
     static char fix[] = {0x0, 0x0, 0x0, 0x1};
+    char sps[64] = {0};
+    char pps[64] = {0};
+    int spsLen = 0;
+    int ppslen = 0;
+
     RTMPPacket packet = {0};
     int failCount = 0;
     int aac_init = 0;
@@ -71,6 +79,11 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     size_t frame_size = 0;
     bool opus_decode_init = false;
     state *params = NULL;
+
+    // mp4
+    CMp4Encode mp4_encode;
+    static unsigned char frame_buff[128 * 1024];
+    bool mp_init = false;
 
     while (RTMP_IsConnected(rtmp)) {
         readBytes = RTMP_ReadPacket(rtmp, &packet);
@@ -109,6 +122,11 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                 Packet* comm_packet = new Packet(frame_size);
                 memcpy(comm_packet->data, adts, 7);
                 memcpy(comm_packet->data + 7, data + 2, comm_packet->len - 7);
+
+                // for mp4
+                if (mp_init) {
+                    mp4_encode.FileWrite(MEDIA_FRAME_AUDIO, (unsigned char*)comm_packet->data, frame_size);
+                }
                 
                 if (!opus_decode_init) {
                     if (pcm_codec.Init((unsigned char*)comm_packet->data, comm_packet->len, 1)) {
@@ -184,51 +202,97 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                         int profile = p[0];
                         int levelid = p[3];
                         int numSps = p[5] & 0x1f;
-                        int spsLen = (p[6] << 8) | p[7];
+                        spsLen = (p[6] << 8) | p[7];
                         if (spsLen > 64)  {
                             debug("error spslen:%d", spsLen);
                             break;
                         }
-                        char sps[64] = {0};
                         memcpy(sps, p + 8, spsLen);
                         int idx = 8 + spsLen;
                         int numPps = p[idx];
-                        debug("profile %d levelid %d numSps %d numPps %d\n", profile, levelid, numSps, numPps);
+                        debug("profile %d levelid %d numSps %d numPps %d", profile, levelid, numSps, numPps);
                         idx++;
-                        int ppslen = (p[idx] << 8) | p[idx + 1];
+                        ppslen = (p[idx] << 8) | p[idx + 1];
                         idx += 2;
-                        char pps[64] = {0};
                         if (ppslen > 64)  {
                             debug("error ppslen:%d", ppslen);
                             break;
                         }
                         memcpy(pps, p + idx, ppslen);
-                        fwrite(fix, sizeof(fix), 1, fp_h264);
-                        fwrite(sps, spsLen, 1, fp_h264);
-                        fwrite(fix, sizeof(fix), 1, fp_h264);
-                        fwrite(pps, ppslen, 1, fp_h264);
-                        fflush(fp_h264);
                         h264_init = 1;
                         debug("add sps pps");
                     } while (0);
+
                 }
             } else if (h264_init &&  data[1] == 1)  {
+                if (((data[0] >> 4) & 0x0f) == 1) {
+                    fwrite(fix, sizeof(fix), 1, fp_h264);
+                    fwrite(sps, spsLen, 1, fp_h264);
+                    fwrite(fix, sizeof(fix), 1, fp_h264);
+                    fwrite(pps, ppslen, 1, fp_h264); 
+                }
                 fwrite(fix, sizeof(fix), 1, fp_h264);
                 fwrite(data + 9, size - 9, 1, fp_h264);
                 fflush(fp_h264);
+
+                do {
+                    if (mp_init)  break;
+                    // for mp4
+                    get_bit_context buffer;
+                    SPS h264_sps_context;
+                    memset(&buffer, 0, sizeof(get_bit_context));
+                    buffer.buf = (uint8_t*)sps + 1;
+                    buffer.buf_size = spsLen -1;
+                    h264dec_seq_parameter_set(&buffer, &h264_sps_context);
+
+
+                    int width = (h264_sps_context.pic_width_in_mbs_minus1 + 1) * 16;
+                    int height = (h264_sps_context.pic_height_in_map_units_minus1 + 1) * 16 * (2 - h264_sps_context.frame_mbs_only_flag);
+                    int timescale = h264_sps_context.vui_parameters.time_scale;
+                    int tick = h264_sps_context.vui_parameters.num_units_in_tick;
+                    float framerate = 0;
+                    h264_get_framerate(&framerate, &h264_sps_context);
+
+                    debug("timescale:%d tick:%d framerate:%.1f", timescale, tick, framerate);
+                    int ret = mp4_encode.FileCreate("test.mp4",
+                                                width,
+                                                height,
+                                                timescale,
+                                                framerate, 
+                                                tick);
+                    if (0 != ret) {
+                        debug("create mp4 file failed");
+                        break;
+                    }
+                    memcpy(frame_buff, fix, sizeof(fix));
+                    memcpy(frame_buff + sizeof(fix), sps, spsLen);
+                    mp4_encode.FileWrite(MEDIA_FRAME_VIDEO, frame_buff, spsLen + sizeof(fix));
+
+                    memcpy(frame_buff, fix, sizeof(fix));
+                    memcpy(frame_buff + sizeof(fix), pps, ppslen);
+                    mp4_encode.FileWrite(MEDIA_FRAME_VIDEO, frame_buff, ppslen + sizeof(fix));
+                    mp_init = true;
+                }  while (0);
+
+                if (mp_init) {
+                    memcpy(frame_buff, fix, sizeof(fix));
+                    memcpy(frame_buff + sizeof(fix), data + 9, size - 9);
+                    mp4_encode.FileWrite(MEDIA_FRAME_VIDEO, frame_buff, size - 9 + sizeof(fix));
+                }
             }
         }
         RTMPPacket_Free(&packet);
-        if (time(0) - last_stream_t > 30) {
-            debug("inot recv stream exit....");
+        if (time(0) - last_stream_t > 5) {
+            debug("timeout recv stream exit....");
             break;
         }
     }
 
+    mp4_encode.FileClose();
+
     if (rtmp)  {
         RTMP_Close(rtmp);
         RTMP_Free(rtmp);
-        rtmp=NULL;
     }
     if (fp_aac) {
         fclose(fp_aac);   

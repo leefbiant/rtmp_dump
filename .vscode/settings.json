@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "rtmp_h264_aac.h": "c"
+        "rtmp_h264_aac.h": "c",
+        "bitset": "cpp"
     }
 }

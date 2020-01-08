@@ -11,5 +11,6 @@ int main(int argc, const char * argv[]) {
         Using();
       }
       RtmpDump(argv[1], argv[2], argv[3], argv[4]);
+      sleep(1);
       return 0;
 }
