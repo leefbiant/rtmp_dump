@@ -114,6 +114,7 @@ CopusEncode::CopusEncode() {
   m_init = false;
   m_packet_len = 0;
   m_cache_len = 0;
+  m_pcm_packet = NULL;
 }
 
 

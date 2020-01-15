@@ -8,7 +8,7 @@ LDFLAGS = -Wl,-rpath,$(RUNLIBPATH)
 
 target = rtmp_dump
 
-objects = rtmp_dump.o main.o flvparse.o opus_encode.o ogg_packet.o mp4_encode.o sps_pps.o
+objects = rtmp_dump.o main.o flvparse.o opus_encode.o ogg_packet.o mp4_encode.o sps_pps.o converter.o 
 all: $(target)
 $(target): $(objects)
 	$(CC) -o $@ $^ $(LIBPATH) $(LIB) $(LDFLAGS) 

@@ -19,6 +19,14 @@ Last Modified       : 2019-12-28 22:59:02
 #include "rtmp_dump.h"
 #include "sps_pps.h"
 #include "mp4_encode.h"
+#include "mp4_encode.h"
+
+// #include "splitter.h"
+#include "converter.h"
+
+using namespace std;
+using namespace Cnvt;
+
 
 void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file, const char* opus_file) {
 
@@ -84,6 +92,16 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     CMp4Encode mp4_encode;
     static unsigned char frame_buff[128 * 1024];
     bool mp_init = false;
+    float framerate = 0;
+    get_bit_context buffer;
+    SPS h264_sps_context;
+
+    // flv
+    CConverter flv_stream;
+    uint32_t flv_audio_timestamp = 0;
+    uint32_t flv_video_timestamp = 0;
+    flv_stream.Open("test.flv", 1, 1);
+    bool flv_init = false;
 
     while (RTMP_IsConnected(rtmp)) {
         readBytes = RTMP_ReadPacket(rtmp, &packet);
@@ -122,6 +140,10 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                 Packet* comm_packet = new Packet(frame_size);
                 memcpy(comm_packet->data, adts, 7);
                 memcpy(comm_packet->data + 7, data + 2, comm_packet->len - 7);
+
+                // for flv
+                flv_stream.ConvertAAC(comm_packet->data, comm_packet->len, flv_audio_timestamp);
+                // flv_audio_timestamp += double(1024 * 1000) / double(GetSamples(adts_ctx.sampleRateIdx));
 
                 // for mp4
                 if (mp_init) {
@@ -221,6 +243,24 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                         memcpy(pps, p + idx, ppslen);
                         h264_init = 1;
                         debug("add sps pps");
+
+                        memset(&buffer, 0, sizeof(get_bit_context));
+                        buffer.buf = (uint8_t *)sps + 1;
+                        buffer.buf_size = spsLen - 1;
+                        h264dec_seq_parameter_set(&buffer, &h264_sps_context);
+                        h264_get_framerate(&framerate, &h264_sps_context);
+
+                        // for flv
+                        if (!flv_init) {
+                            debug("framerate:%.2f titck:%.2f", framerate, h264_sps_context.vui_parameters.time_scale / (2 * h264_sps_context.vui_parameters.num_units_in_tick));
+                            memcpy(frame_buff, fix, sizeof(fix));
+                            memcpy(frame_buff+sizeof(fix), sps, spsLen);
+                            flv_stream.ConvertH264((char*)frame_buff, spsLen + sizeof(fix), flv_video_timestamp);
+
+                            memcpy(frame_buff+sizeof(fix), pps, ppslen);
+                            flv_stream.ConvertH264((char*)frame_buff, ppslen + sizeof(fix), flv_video_timestamp);
+                            flv_init = true;
+                        }
                     } while (0);
 
                 }
@@ -229,30 +269,28 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                     fwrite(fix, sizeof(fix), 1, fp_h264);
                     fwrite(sps, spsLen, 1, fp_h264);
                     fwrite(fix, sizeof(fix), 1, fp_h264);
-                    fwrite(pps, ppslen, 1, fp_h264); 
+                    fwrite(pps, ppslen, 1, fp_h264);
                 }
                 fwrite(fix, sizeof(fix), 1, fp_h264);
                 fwrite(data + 9, size - 9, 1, fp_h264);
                 fflush(fp_h264);
 
+                if (flv_init) {
+                    memcpy(frame_buff, fix, sizeof(fix));
+                    memcpy(frame_buff + sizeof(fix), data + 9, size - 9);
+                    flv_stream.ConvertH264((char *)frame_buff, size - 9 + sizeof(fix), flv_video_timestamp);
+                    //flv_video_timestamp += h264_sps_context.vui_parameters.time_scale / (2 * h264_sps_context.vui_parameters.num_units_in_tick);
+                    // flv_video_timestamp += 25;
+                    debug("flv_video_timestamp:%u", flv_video_timestamp);
+                }
                 do {
                     if (mp_init)  break;
                     // for mp4
-                    get_bit_context buffer;
-                    SPS h264_sps_context;
-                    memset(&buffer, 0, sizeof(get_bit_context));
-                    buffer.buf = (uint8_t*)sps + 1;
-                    buffer.buf_size = spsLen -1;
-                    h264dec_seq_parameter_set(&buffer, &h264_sps_context);
-
-
                     int width = (h264_sps_context.pic_width_in_mbs_minus1 + 1) * 16;
                     int height = (h264_sps_context.pic_height_in_map_units_minus1 + 1) * 16 * (2 - h264_sps_context.frame_mbs_only_flag);
                     int timescale = h264_sps_context.vui_parameters.time_scale;
                     int tick = h264_sps_context.vui_parameters.num_units_in_tick;
-                    float framerate = 0;
-                    h264_get_framerate(&framerate, &h264_sps_context);
-
+                    
                     debug("timescale:%d tick:%d framerate:%.1f", timescale, tick, framerate);
                     int ret = mp4_encode.FileCreate("test.mp4",
                                                 width,
@@ -289,6 +327,7 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     }
 
     mp4_encode.FileClose();
+    flv_stream.Close();
 
     if (rtmp)  {
         RTMP_Close(rtmp);
