@@ -237,7 +237,7 @@ namespace Cnvt
 			_pAudioSpecificConfig[0] = (_aacProfile << 3) + (_sampleRateIndex>>1);
 			_pAudioSpecificConfig[1] = ((_sampleRateIndex&0x01)<<7) + (_channelConfig<<3);
 		}
-		if (_pAudioSpecificConfig != NULL & _bWriteAACSeqHeader == 0)
+		if ((_pAudioSpecificConfig != NULL) & (_bWriteAACSeqHeader == 0))
 		{
 			WriteAACHeader(nTimeStamp);
 			_bWriteAACSeqHeader = 1;

@@ -6,7 +6,7 @@ Description         : ---
 Create              : 2019-07-12 23:09:12
 Last Modified       : 2019-07-12 23:09:12
 ***********************************************/
-#include "opus_encode.h"
+#include "audio_codec.h"
 #include <math.h>
 
 
@@ -329,6 +329,7 @@ int CopusDecode::Init(int sample_rates, int chan_num) {
     return -1;
   }
   m_init = true;
+  return 0;
 }
 
 int CopusDecode::DecodeOpus(unsigned char* opus_bytes, uint32_t opus_len) {
@@ -380,6 +381,7 @@ CaacEncode::~CaacEncode() {
 int CaacEncode::EncodeConfig(int sample_rates, int chan_num) {
   m_encode_sample_rates = sample_rates;
   m_encode_chan_num = chan_num;
+  return 0;
 }
 
 int CaacEncode::Init(int sample_rates, int chan_num) {

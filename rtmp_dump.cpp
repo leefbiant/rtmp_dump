@@ -22,7 +22,6 @@ Last Modified       : 2019-12-28 22:59:02
 #include "mp4_encode.h"
 
 #include "converter.h"
-#include "aac_test.h"
 
 using namespace std;
 using namespace Cnvt;
@@ -107,7 +106,6 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     bool flv_init = false;
 
     // aac encoder
-    CAAcTest aac_encode_test;
 
     while (RTMP_IsConnected(rtmp)) {
         readBytes = RTMP_ReadPacket(rtmp, &packet);
@@ -160,7 +158,6 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                     if (aac_decoder.Init((unsigned char*)comm_packet->data, comm_packet->len)) {
                         opus_encoder.Init(aac_decoder.m_samplerate, aac_decoder.m_channels);
                         aac_decode_init = true;
-                        aac_encode_test.Init(aac_decoder.m_samplerate, aac_decoder.m_channels);
                     }
                 }
                 if (!aac_decode_init) {
@@ -177,8 +174,6 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
 
                     fwrite(comm_packet->data, 1, comm_packet->len, fp_pcm);
                     fflush(fp_pcm);
-                    // for test aac encoder
-                    aac_encode_test.Run((unsigned char *)comm_packet->data, comm_packet->len);
 
                     ret = opus_encoder.EncodeOpus((unsigned char*)comm_packet->data, comm_packet->len);
                     delete comm_packet;
