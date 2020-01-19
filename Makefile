@@ -1,5 +1,5 @@
 CC = g++
-LIB = -lrtmp -lopus -lfaad -logg -lsamplerate -l:libmp4v2.a -lssl -lcrypto -lz 
+LIB = -lrtmp -lopus -lfaad -lfaac -logg -lsamplerate -l:libmp4v2.a -lssl -lcrypto -lz 
 RUNLIBPATH=/opt/source/rtmpdump/librtmp
 LIBPATH=-L../rtmpdump/librtmp -L/opt/source/lib/lib
 CINC = -I/opt/source/rtmpdump/librtmp -I/opt/source/lib/include

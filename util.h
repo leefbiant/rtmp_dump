@@ -56,10 +56,23 @@ struct Packet {
     this->data = new char[this->len];;
     memcpy(this->data, data, this->len);
   }
-  ~Packet() {
+  virtual ~Packet() {
     if (data) {
       delete[] data;
     }
+  }
+};
+
+struct PcmPacket : public Packet {
+  int samples; 
+  int channels; 
+  PcmPacket() :Packet() {
+  }
+  PcmPacket(int len) : Packet(len) {
+  }
+  PcmPacket(const char* data, int len) : Packet(data, len) {
+  }
+  virtual ~PcmPacket() {
   }
 };
 

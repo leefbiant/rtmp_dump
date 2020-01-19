@@ -16,6 +16,7 @@ Last Modified       : 2019-07-12 23:09:37
 #include <arpa/inet.h>
 
 #include "faad.h"
+#include "faac.h"
 #include "opus/opus.h"
 #include "ogg/ogg.h"
 
@@ -40,18 +41,19 @@ extern "C" {
 #define MAX_PACKET_SIZE (3*1276) 
 
 
-class CpcmCodec {
+class AAcDecoder {
   public:
-    CpcmCodec();
-    ~CpcmCodec();
+    AAcDecoder();
+    ~AAcDecoder();
 
   public:
-    bool Init(unsigned char* data, size_t len, int dst_channels = 2);
+    bool Init(unsigned char* data, size_t len);
     int CDecDecode(Packet *packet);
     int GetPcmPacket(Packet **packet);
 
-  private:
+  public:
     NeAACDecFrameInfo frame_info;
+  private:
     NeAACDecHandle decoder;
 
     bool m_init;
@@ -61,8 +63,6 @@ class CpcmCodec {
     CObjectPool<Packet> m_pcm_queue;
     unsigned long m_samplerate;
     unsigned char m_channels;
-    unsigned char m_dst_channels;
-
 };
 
 class CopusEncode {
@@ -75,11 +75,15 @@ class CopusEncode {
     int packet_set(unsigned char* pcm_bytes, uint32_t pcm_len);
     int packet_get();
     int EncodeOpus(unsigned char* pcm_bytes, uint32_t pcm_len);
+    int EncodeOpus(PcmPacket* pcm_packet);
   public:
     OpusEncoder *encode_hander;
     bool m_init;
     int m_channels;
     int m_sample_rates;
+    int m_input_channels;
+    int m_input_sample_rates;
+    
     int m_frame_size;
     unsigned char m_pcm_cache[16*1024];
     uint32_t m_cache_len;
@@ -87,4 +91,49 @@ class CopusEncode {
     uint32_t m_packet_len;
     CObjectPool<Packet> m_opus_queue;
 };
+
+class CopusDecode {
+public:
+    CopusDecode();
+    CopusDecode(int sample_rates, int chan_num);
+    virtual ~CopusDecode();
+public:
+    int Init(int sample_rates, int chan_num);
+    int DecodeOpus(unsigned char* opus_bytes, uint32_t opus_len);
+private:
+    CObjectPool<Packet> m_pcm_queue;
+    OpusDecoder *decode_hander;
+public:
+    int m_sample_rates;
+    int m_chan_num;
+    int m_init;
+};
+
+
+class CaacEncode {
+public:
+    CaacEncode();
+    ~CaacEncode();
+public:
+    int EncodeConfig(int sample_rates, int chan_num);
+    int Init(int sample_rates, int chan_num);
+    int AacEncode(unsigned char* pcm_bytes, uint32_t pcm_len);
+private:
+    faacEncHandle encode_hander;
+    Packet* m_cache;
+    Packet* m_out;
+    uint32_t m_pcm_cache_len;
+    const int m_pcm_bit_size;
+public:
+    CObjectPool<Packet> m_aac_queue;
+    int m_sample_rates;
+    int m_chan_num;
+    unsigned int m_pcm_buff_size;
+    unsigned int m_samplesInput;
+    int m_init;
+
+    int m_encode_sample_rates;
+    int m_encode_chan_num;
+};
+
 #endif

@@ -21,8 +21,8 @@ Last Modified       : 2019-12-28 22:59:02
 #include "mp4_encode.h"
 #include "mp4_encode.h"
 
-// #include "splitter.h"
 #include "converter.h"
+#include "aac_test.h"
 
 using namespace std;
 using namespace Cnvt;
@@ -82,11 +82,14 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     int h264_init = 0;
     time_t last_stream_t = time(0);
 
-    CpcmCodec pcm_codec;
-    CopusEncode opus_encode;
+    AAcDecoder aac_decoder;
+    CopusEncode opus_encoder;
     size_t frame_size = 0;
-    bool opus_decode_init = false;
+    bool aac_decode_init = false;
     state *params = NULL;
+
+    // pcm
+    FILE* fp_pcm = fopen("test.pcm", "wb");
 
     // mp4
     CMp4Encode mp4_encode;
@@ -102,6 +105,9 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     uint32_t flv_video_timestamp = 0;
     flv_stream.Open("test.flv", 1, 1);
     bool flv_init = false;
+
+    // aac encoder
+    CAAcTest aac_encode_test;
 
     while (RTMP_IsConnected(rtmp)) {
         readBytes = RTMP_ReadPacket(rtmp, &packet);
@@ -150,31 +156,38 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                     mp4_encode.FileWrite(MEDIA_FRAME_AUDIO, (unsigned char*)comm_packet->data, frame_size);
                 }
                 
-                if (!opus_decode_init) {
-                    if (pcm_codec.Init((unsigned char*)comm_packet->data, comm_packet->len, 1)) {
-                        opus_encode.Init(pcm_codec.m_samplerate, 1);
-                        opus_decode_init = true;
+                if (!aac_decode_init) {
+                    if (aac_decoder.Init((unsigned char*)comm_packet->data, comm_packet->len)) {
+                        opus_encoder.Init(aac_decoder.m_samplerate, aac_decoder.m_channels);
+                        aac_decode_init = true;
+                        aac_encode_test.Init(aac_decoder.m_samplerate, aac_decoder.m_channels);
                     }
                 }
-                if (!opus_decode_init) {
+                if (!aac_decode_init) {
                     delete comm_packet;
                     continue;
                 }
-                int ret = pcm_codec.CDecDecode(comm_packet);
+                int ret = aac_decoder.CDecDecode(comm_packet);
                 if (ret < 0) {
                     debug("pcm codec failed");
                     continue;
                 }
                 comm_packet = NULL;
-                while (0 == pcm_codec.m_pcm_queue.GetObject(&comm_packet) && comm_packet) {
-                    ret = opus_encode.EncodeOpus((unsigned char*)comm_packet->data, comm_packet->len);
+                while (0 == aac_decoder.m_pcm_queue.GetObject(&comm_packet) && comm_packet) {
+
+                    fwrite(comm_packet->data, 1, comm_packet->len, fp_pcm);
+                    fflush(fp_pcm);
+                    // for test aac encoder
+                    aac_encode_test.Run((unsigned char *)comm_packet->data, comm_packet->len);
+
+                    ret = opus_encoder.EncodeOpus((unsigned char*)comm_packet->data, comm_packet->len);
                     delete comm_packet;
                     comm_packet = NULL;
                     if (ret < 0) {
                         debug("aac encode failed");
                         continue; 
                     }
-                    while (0 == opus_encode.m_opus_queue.GetObject(&comm_packet) && comm_packet) {
+                    while (0 == opus_encoder.m_opus_queue.GetObject(&comm_packet) && comm_packet) {
                         // for ogg 
                         do {
                             if (params) break;
@@ -191,19 +204,19 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                                 }
                                 break;
                             }
-                            ogg_packet *op = op_opushead(opus_encode.m_sample_rates, opus_encode.m_channels);
+                            ogg_packet *op = op_opushead(opus_encoder.m_sample_rates, opus_encoder.m_channels);
                             ogg_stream_packetin(params->stream, op);
                             op_free(op);
                             op = op_opustags();
                             ogg_stream_packetin(params->stream, op);
                             op_free(op);
                             ogg_flush(params);
-                            debug("ogg init sucess sample_rates:%d channels:%d", opus_encode.m_sample_rates, opus_encode.m_channels);
+                            debug("ogg init sucess sample_rates:%d channels:%d", opus_encoder.m_sample_rates, opus_encoder.m_channels);
                         } while (0);
                         // write packet
                         if (params) {
                             ogg_packet *op = op_from_pkt((const unsigned char*)comm_packet->data, comm_packet->len);
-                            int samples = opus_packet_get_nb_samples((const unsigned char*)comm_packet->data, comm_packet->len, opus_encode.m_sample_rates);
+                            int samples = opus_packet_get_nb_samples((const unsigned char*)comm_packet->data, comm_packet->len, opus_encoder.m_sample_rates);
                             if (samples > 0) params->granulepos += samples;
                             op->granulepos = params->granulepos;
                             ogg_stream_packetin(params->stream, op);
@@ -279,9 +292,9 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                     memcpy(frame_buff, fix, sizeof(fix));
                     memcpy(frame_buff + sizeof(fix), data + 9, size - 9);
                     flv_stream.ConvertH264((char *)frame_buff, size - 9 + sizeof(fix), flv_video_timestamp);
-                    //flv_video_timestamp += h264_sps_context.vui_parameters.time_scale / (2 * h264_sps_context.vui_parameters.num_units_in_tick);
-                    // flv_video_timestamp += 25;
-                    debug("flv_video_timestamp:%u", flv_video_timestamp);
+                    // flv_video_timestamp += 1000 / framerate;
+                    flv_video_timestamp += 29;
+                    // debug("flv_video_timestamp:%u", flv_video_timestamp);
                 }
                 do {
                     if (mp_init)  break;
