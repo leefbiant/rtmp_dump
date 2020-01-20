@@ -44,7 +44,7 @@ do { \
 
 struct Packet {
   char* data;
-  int len;
+  uint32_t len;
   Packet():data(NULL), len(0) {
   }
   Packet(int len) {

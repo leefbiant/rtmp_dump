@@ -81,8 +81,8 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     int h264_init = 0;
     time_t last_stream_t = time(0);
 
-    AAcDecoder aac_decoder;
-    CopusEncode opus_encoder;
+    AAcDecoder aac_decoder_handle;
+    CopusEncode opus_encoder_handle;
     size_t frame_size = 0;
     bool aac_decode_init = false;
     state *params = NULL;
@@ -105,7 +105,11 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     flv_stream.Open("test.flv", 1, 1);
     bool flv_init = false;
 
+    // opus decoder
+    CopusDecode opus_decoder_handle;
     // aac encoder
+    CaacEncode aac_encoder_handle;
+    FILE* fp_aac2 = fopen("test2.aac", "wb");
 
     while (RTMP_IsConnected(rtmp)) {
         readBytes = RTMP_ReadPacket(rtmp, &packet);
@@ -155,8 +159,8 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                 }
                 
                 if (!aac_decode_init) {
-                    if (aac_decoder.Init((unsigned char*)comm_packet->data, comm_packet->len)) {
-                        opus_encoder.Init(aac_decoder.m_samplerate, aac_decoder.m_channels);
+                    if (aac_decoder_handle.Init((unsigned char*)comm_packet->data, comm_packet->len)) {
+                        opus_encoder_handle.Init(aac_decoder_handle.m_samplerate, aac_decoder_handle.m_channels);
                         aac_decode_init = true;
                     }
                 }
@@ -164,25 +168,58 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                     delete comm_packet;
                     continue;
                 }
-                int ret = aac_decoder.CDecDecode(comm_packet);
+                int ret = aac_decoder_handle.CDecDecode(comm_packet);
                 if (ret < 0) {
                     debug("pcm codec failed");
                     continue;
                 }
                 comm_packet = NULL;
-                while (0 == aac_decoder.m_pcm_queue.GetObject(&comm_packet) && comm_packet) {
-
+                while (0 == aac_decoder_handle.m_pcm_queue.GetObject(&comm_packet) && comm_packet) {
+                    // write pcm
                     fwrite(comm_packet->data, 1, comm_packet->len, fp_pcm);
                     fflush(fp_pcm);
 
-                    ret = opus_encoder.EncodeOpus((unsigned char*)comm_packet->data, comm_packet->len);
+                    ret = opus_encoder_handle.EncodeOpus((unsigned char*)comm_packet->data, comm_packet->len);
                     delete comm_packet;
                     comm_packet = NULL;
                     if (ret < 0) {
                         debug("aac encode failed");
                         continue; 
                     }
-                    while (0 == opus_encoder.m_opus_queue.GetObject(&comm_packet) && comm_packet) {
+                    while (0 == opus_encoder_handle.m_opus_queue.GetObject(&comm_packet) && comm_packet) {
+                        // for opus decode
+                        do {
+                            if (!opus_decoder_handle.m_init) {
+                                if (opus_decoder_handle.Init(opus_encoder_handle.m_sample_rates, opus_encoder_handle.m_channels) < 0) {
+                                    debug("opus_decoder_handle init failed");
+                                    break;
+                                }
+                            } 
+                            int ret = opus_decoder_handle.DecodeOpus((unsigned char*)comm_packet->data, comm_packet->len);
+                            if (ret <= 0) break;
+                            Packet* pcm_packet = NULL;
+                            while (0 == opus_decoder_handle.m_pcm_queue.GetObject(&pcm_packet) && pcm_packet) {
+                                // for aac encode
+                                do {
+                                    if (!aac_encoder_handle.m_init) {
+                                        if (aac_encoder_handle.Init(opus_decoder_handle.m_sample_rates, opus_decoder_handle.m_channels) < 0) {
+                                            debug("aac_encoder_handle init failed");
+                                            break;
+                                        }
+                                    }
+                                    int ret = aac_encoder_handle.AacEncode((unsigned char*)pcm_packet->data, pcm_packet->len);
+                                   if (ret <= 0) break;
+                                    Packet* aac_packet = NULL;
+                                    while (0 == aac_encoder_handle.m_aac_queue.GetObject(&aac_packet) && aac_packet) {
+                                        fwrite(aac_packet->data, 1, aac_packet->len, fp_aac2);
+                                        fflush(fp_aac2);
+                                        delete aac_packet;
+                                    }
+                                } while (0);
+                                delete pcm_packet;
+                            }
+                        } while (0);
+
                         // for ogg 
                         do {
                             if (params) break;
@@ -199,19 +236,19 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                                 }
                                 break;
                             }
-                            ogg_packet *op = op_opushead(opus_encoder.m_sample_rates, opus_encoder.m_channels);
+                            ogg_packet *op = op_opushead(opus_encoder_handle.m_sample_rates, opus_encoder_handle.m_channels);
                             ogg_stream_packetin(params->stream, op);
                             op_free(op);
                             op = op_opustags();
                             ogg_stream_packetin(params->stream, op);
                             op_free(op);
                             ogg_flush(params);
-                            debug("ogg init sucess sample_rates:%d channels:%d", opus_encoder.m_sample_rates, opus_encoder.m_channels);
+                            debug("ogg init sucess sample_rates:%d channels:%d", opus_encoder_handle.m_sample_rates, opus_encoder_handle.m_channels);
                         } while (0);
                         // write packet
                         if (params) {
                             ogg_packet *op = op_from_pkt((const unsigned char*)comm_packet->data, comm_packet->len);
-                            int samples = opus_packet_get_nb_samples((const unsigned char*)comm_packet->data, comm_packet->len, opus_encoder.m_sample_rates);
+                            int samples = opus_packet_get_nb_samples((const unsigned char*)comm_packet->data, comm_packet->len, opus_encoder_handle.m_sample_rates);
                             if (samples > 0) params->granulepos += samples;
                             op->granulepos = params->granulepos;
                             ogg_stream_packetin(params->stream, op);
@@ -335,7 +372,6 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     }
 
     mp4_encode.FileClose();
-    flv_stream.Close();
 
     if (rtmp)  {
         RTMP_Close(rtmp);
@@ -353,6 +389,11 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
         ogg_stream_destroy(params->stream);
         free(params);
         params = NULL;
+    }
+
+    if (fp_aac2) {
+        fclose(fp_aac2);
+        fp_aac2 = NULL;
     }
 
     debug("sucess");

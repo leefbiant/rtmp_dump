@@ -59,44 +59,7 @@ int AAcDecoder::CDecDecode(Packet* packet) {
       continue;
     }
     uint32_t pcm_len = frame_info.samples * frame_info.channels;
-    /*
-    // 重采样
-    if (m_samplerate != SAMPLE_RATE) {
-      static float in[4096] = {0};
-      static float out[4096] = {0};
-      src_short_to_float_array((short *)pcm_data, in, pcm_len / sizeof(short));
-      static char sample_buff[16 * 1024] = {0};
-      SRC_DATA src_data;
-      memset(&src_data, 0x00, sizeof(SRC_DATA));
-      src_data.src_ratio = 1.0 * SAMPLE_RATE / m_samplerate;
-      src_data.end_of_input = 0;
-      src_data.input_frames = frame_info.samples;
-      src_data.output_frames = sizeof(out);
-      src_data.data_in = in;
-      src_data.data_out = out;
-      int error = 0;
-      do  {
-        if ((error = src_simple(&src_data, SRC_ZERO_ORDER_HOLD, frame_info.channels)))  {
-          debug("src_simple err frae_info.channels:%d : %s", frame_info.channels, src_strerror(error));
-          break;
-        }
-        uint32_t pcm_sample_len = src_data.output_frames_gen * frame_info.channels;
-        src_float_to_short_array(out, (short *)sample_buff, pcm_sample_len);
-        if (frame_info.channels == 2 && m_dst_channels == 1)
-        {
-          short *audio_buff = (short *)sample_buff;
-          for (uint32_t j = 0; j < pcm_sample_len / sizeof(short); ++j)
-          {
-            audio_buff[j] = (audio_buff[2 * j] + audio_buff[2 * j + 1]) >> 1;
-          }
-          pcm_sample_len /= 2;
-        }
-        packet = new Packet(sample_buff, pcm_sample_len);
-        m_pcm_queue.SetObject(packet);
-      } while (0);
-    }  else {
-    */
-    
+  
     PcmPacket* packet = new PcmPacket((const char *)pcm_data, pcm_len);
     packet->samples = frame_info.samples;
     packet->channels = frame_info.channels;
@@ -303,7 +266,7 @@ int CopusEncode::EncodeOpus(PcmPacket* pcm_packet) {
   return m_opus_queue.GetNum();
 }
 
-CopusDecode::CopusDecode():m_sample_rates(16000), m_chan_num(1) {
+CopusDecode::CopusDecode():m_sample_rates(16000), m_channels(1) {
   m_init = false;
   decode_hander = NULL;
 }
@@ -321,34 +284,39 @@ CopusDecode::~CopusDecode() {
 
 int CopusDecode::Init(int sample_rates, int chan_num) {
   m_sample_rates = sample_rates > 0 ? sample_rates : m_sample_rates;
-  m_chan_num = chan_num > 0 ? chan_num : m_chan_num;
+  m_channels = chan_num > 0 ? chan_num : m_channels;
   int err;
-  decode_hander = opus_decoder_create(m_sample_rates, m_chan_num, &err);
+  decode_hander = opus_decoder_create(m_sample_rates, m_channels, &err);
   if (err < 0) {
     debug("opus_decoder_create failed : %s", opus_strerror(err));
     return -1;
   }
+  debug("CopusDecode::Init m_sample_rates:%d m_channels:%d", m_sample_rates, m_channels);
   m_init = true;
   return 0;
 }
 
 int CopusDecode::DecodeOpus(unsigned char* opus_bytes, uint32_t opus_len) {
   static opus_int16 out[MAX_FRAME_SIZE*2];
-  int frame_size = opus_decode(decode_hander, opus_bytes, opus_len, out, MAX_FRAME_SIZE, 0);
-  if (frame_size < 0) {
-      debug("decoder failed: %s\n", opus_strerror(frame_size));
-      return -1;
-  }
-  Packet* packet = new Packet(m_chan_num * frame_size);
-  for(int i=0; i < m_chan_num * frame_size; i++)   {
-      packet->data[2*i] = out[i]&0xFF;
-      packet->data[2*i+1] = (out[i]>>8)&0xFF;
-  }
-  m_pcm_queue.SetObject(packet);
+  do {
+    int frame_size = opus_decode(decode_hander, opus_bytes, opus_len, out, MAX_FRAME_SIZE*2, 0);
+    if (frame_size < 0) {
+        // debug("decoder failed:  %s", opus_strerror(frame_size));
+        break;
+    }
+    PcmPacket* packet = new PcmPacket(m_channels * frame_size * 2);
+    for(int i=0; i < m_channels * frame_size; i++)   {
+        packet->data[2*i] = out[i]&0xFF;
+        packet->data[2*i+1] = (out[i]>>8)&0xFF;
+    }
+    packet->channels = m_channels;
+    packet->samples = m_sample_rates;
+    m_pcm_queue.SetObject(packet);
+  } while (0);
   return m_pcm_queue.GetNum();
 }
 
-CaacEncode::CaacEncode(): m_encode_sample_rates(44100), m_encode_chan_num(2),m_pcm_bit_size(16) {
+CaacEncode::CaacEncode(): m_sample_rates(44100), m_channels(1),m_pcm_bit_size(16) {
   m_cache = NULL;
   encode_hander = NULL;
   m_cache = NULL;
@@ -379,27 +347,28 @@ CaacEncode::~CaacEncode() {
   }
 }
 int CaacEncode::EncodeConfig(int sample_rates, int chan_num) {
-  m_encode_sample_rates = sample_rates;
-  m_encode_chan_num = chan_num;
+  m_sample_rates = sample_rates;
+  m_channels = chan_num;
   return 0;
 }
 
 int CaacEncode::Init(int sample_rates, int chan_num) {
-  m_sample_rates = sample_rates;
-  m_chan_num = chan_num;
+  m_input_sample_rates = sample_rates;
+  m_input_channels = chan_num;
   long maxOutputBytes = 0;
-  encode_hander = faacEncOpen(m_encode_sample_rates, m_encode_chan_num, (long unsigned int*)&m_samplesInput, (long unsigned int*)&maxOutputBytes);
+  debug("CaacEncode::Init m_input_sample_rates:%d m_input_channels:%d", m_input_sample_rates, m_input_channels);
+  encode_hander = faacEncOpen(m_sample_rates, m_channels, (long unsigned int*)&m_samplesInput, (long unsigned int*)&maxOutputBytes);
   if (!encode_hander) {
     debug("faacEncOpen failed");
     return -1;
   }
-  debug("m_sample_rates:%d m_chan_num:%d samplesInput:%d maxOutputBytes:%d",m_encode_sample_rates, m_encode_chan_num, m_samplesInput, maxOutputBytes);
+  debug("m_sample_rates:%d m_channels:%d samplesInput:%d maxOutputBytes:%d",m_sample_rates, m_channels, m_samplesInput, maxOutputBytes);
   faacEncConfigurationPtr config = faacEncGetCurrentConfiguration(encode_hander);
   debug("default config: type:%d outputFormat:%d bitRate:%d", config->aacObjectType, config->outputFormat, config->inputFormat);
   config->inputFormat = FAAC_INPUT_16BIT;
   faacEncSetConfiguration(encode_hander, config); 
-  m_pcm_buff_size = m_samplesInput * 16 / 8;
-  m_cache = new Packet(3 * m_pcm_buff_size);
+  m_pcm_buff_size = m_samplesInput * m_pcm_bit_size / 8;
+  m_cache = new Packet(16 * m_pcm_buff_size);
   m_out = new Packet(maxOutputBytes);
   m_pcm_cache_len = 0;
   m_init = true;
@@ -408,23 +377,53 @@ int CaacEncode::Init(int sample_rates, int chan_num) {
 
 int CaacEncode::AacEncode(unsigned char* pcm_bytes, uint32_t pcm_len) {
   if (!m_init) {
-    if (0 != Init(44100, 1)) {
-      debug("init failed");
+    debug("not init");
+    return -1;
+  }
+  unsigned char* in_data = (unsigned char*)pcm_bytes;
+  uint32_t in_len = pcm_len;
+  if (m_channels != m_input_channels || m_sample_rates != m_input_sample_rates) {
+    static float in[4096] = {0};
+    static float out[4096] = {0};
+    src_short_to_float_array((short *)in_data, in, in_len / sizeof(short));
+    static unsigned char sample_buff[16 * 1024] = {0};
+    SRC_DATA src_data;
+    memset(&src_data, 0x00, sizeof(SRC_DATA));
+    src_data.src_ratio = 1.0 * m_sample_rates / m_input_sample_rates;
+    src_data.end_of_input = 0;
+    src_data.input_frames = in_len / m_input_channels;
+    src_data.output_frames = sizeof(out);
+    src_data.data_in = in;
+    src_data.data_out = out;
+    int error = 0;
+    if ((error = src_simple(&src_data, SRC_ZERO_ORDER_HOLD, m_input_channels))) {
+      debug("src_simple err frae_info.channels:%d : %s", m_input_channels, src_strerror(error));
       return -1;
     }
+    uint32_t pcm_sample_len = src_data.output_frames_gen * m_input_channels;
+    src_float_to_short_array(out, (short *)sample_buff, pcm_sample_len);
+    if (m_input_channels == 2 && m_channels == 1) {
+      // 双声道转单声道
+      short *audio_buff = (short *)sample_buff;
+      for (uint32_t j = 0; j < pcm_sample_len / sizeof(short); ++j) {
+        audio_buff[j] = (audio_buff[2 * j] + audio_buff[2 * j + 1]) >> 1;
+      }
+      pcm_sample_len /= 2;
+    }
+    in_data = sample_buff;
+    in_len = pcm_sample_len;
+  }
+  if (in_len + m_pcm_cache_len > m_cache->len) {
+    debug("buff is full cache buff len:%d cache len:%d in_len:%d m_pcm_buff_size:%d", m_cache->len, m_pcm_cache_len, in_len, m_pcm_buff_size);
+  } else {
+    memcpy(m_cache->data + m_pcm_cache_len, in_data, in_len);
+    m_pcm_cache_len += in_len;
   }
   uint32_t offset = 0;
-  uint32_t pos = 0;
-  while (offset < pcm_len) {
+  const char* pdata = m_cache->data;
+  while (m_pcm_cache_len - offset> m_pcm_buff_size) {
     unsigned long samplesInput = m_samplesInput;
-    if (pcm_len > m_pcm_buff_size) {
-      samplesInput = m_pcm_buff_size / (16 / 8);
-      pos = m_pcm_buff_size;
-    } else {
-      samplesInput = pcm_len / (16 / 8);
-      pos = pcm_len;
-    }
-    int ret = faacEncEncode(encode_hander, (int *)(pcm_bytes + offset), samplesInput, (unsigned char*)m_out->data, m_out->len);
+    int ret = faacEncEncode(encode_hander, (int *)(pdata + offset), samplesInput, (unsigned char*)m_out->data, m_out->len);
     if (ret > 0) {
       Packet* packet = new Packet(m_out->data, ret);
       m_aac_queue.SetObject(packet);
@@ -432,10 +431,14 @@ int CaacEncode::AacEncode(unsigned char* pcm_bytes, uint32_t pcm_len) {
       debug("faacEncEncode failed samplesInput:%d m_pcm_cache_len:%d", samplesInput, m_pcm_cache_len);
       return -1;
     } else {
-      debug("buff is not enough a frame");
+      // debug("buff is not enough a frame");
       break;
     }
-    offset += pos;
+    offset += m_pcm_buff_size;
+  }
+  if (offset > 0) {
+     m_pcm_cache_len -= offset;
+    memmove(m_cache->data, pdata + offset, m_pcm_cache_len);
   }
   return m_aac_queue.GetNum();
 }

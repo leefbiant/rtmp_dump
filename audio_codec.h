@@ -100,12 +100,13 @@ public:
 public:
     int Init(int sample_rates, int chan_num);
     int DecodeOpus(unsigned char* opus_bytes, uint32_t opus_len);
-private:
+public:
     CObjectPool<Packet> m_pcm_queue;
+private:
     OpusDecoder *decode_hander;
 public:
     int m_sample_rates;
-    int m_chan_num;
+    int m_channels;
     int m_init;
 };
 
@@ -127,13 +128,13 @@ private:
 public:
     CObjectPool<Packet> m_aac_queue;
     int m_sample_rates;
-    int m_chan_num;
+    int m_channels;
     unsigned int m_pcm_buff_size;
     unsigned int m_samplesInput;
     int m_init;
 
-    int m_encode_sample_rates;
-    int m_encode_chan_num;
+    int m_input_sample_rates;
+    int m_input_channels;
 };
 
 #endif

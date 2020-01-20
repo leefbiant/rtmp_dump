@@ -24,9 +24,12 @@ namespace Cnvt
 		_bWriteAACSeqHeader = 0;
 	}
 
-	CConverter::~CConverter()
-	{
-
+	CConverter::~CConverter() {
+		Close();
+		if (_pAudioSpecificConfig) {
+			delete[] _pAudioSpecificConfig;
+			_pAudioSpecificConfig = NULL;
+		}
 	}
 
 	int CConverter::Open(std::string strFlvFile, int bHaveAudio, int bHaveVideo)
@@ -45,16 +48,21 @@ namespace Cnvt
 
 	int CConverter::Close()
 	{
-		if (_pSPS != NULL)
+		if (_pSPS != NULL) {
 			delete _pSPS;
-		if (_pPPS != NULL)
+			_pSPS = NULL;
+		}
+
+		if (_pPPS != NULL) {
 			delete _pPPS;
+			_pSPS = NULL;
+		}
 		
-		if (_bHaveVideo!=0)
+		if (_bHaveVideo!=0) {
 			WriteH264EndofSeq();
-
+			_bHaveVideo = 0;
+		}
 		_fileOut.close();
-
 		return 1;
 	}
 
