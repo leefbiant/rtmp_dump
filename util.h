@@ -245,5 +245,11 @@ inline int get_one_ADTS_frame(unsigned char* buffer, size_t buf_size,
   return buffer + size - p;
 }
 
+inline uint64_t GetMstime() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL); 
+  return (tv.tv_sec * 1000 + tv.tv_usec / 1000);
+}
+
 #endif
 

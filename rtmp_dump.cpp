@@ -100,8 +100,9 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
 
     // flv
     CConverter flv_stream;
-    uint32_t flv_audio_timestamp = 0;
-    uint32_t flv_video_timestamp = 0;
+    uint64_t flv_curr_time = 0;
+    uint64_t flv_pre_time = 0;
+    uint64_t dst = 0;
     flv_stream.Open("test.flv", 1, 1);
     bool flv_init = false;
 
@@ -129,6 +130,11 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
 
         const char *data = packet.m_body;
         int size = packet.m_nBodySize;
+        flv_curr_time = GetMstime(); 
+        if (!flv_pre_time) {
+            flv_pre_time = flv_curr_time;
+        }
+        dst += flv_curr_time - flv_pre_time;
 
         if (packet.m_packetType == RTMP_PACKET_TYPE_AUDIO) {
             last_stream_t = time(0);
@@ -150,7 +156,7 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                 memcpy(comm_packet->data + 7, data + 2, comm_packet->len - 7);
 
                 // for flv
-                flv_stream.ConvertAAC(comm_packet->data, comm_packet->len, flv_audio_timestamp);
+                flv_stream.ConvertAAC(comm_packet->data, comm_packet->len, dst);
                 // flv_audio_timestamp += double(1024 * 1000) / double(GetSamples(adts_ctx.sampleRateIdx));
 
                 // for mp4
@@ -300,10 +306,10 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                             debug("framerate:%.2f titck:%.2f", framerate, h264_sps_context.vui_parameters.time_scale / (2 * h264_sps_context.vui_parameters.num_units_in_tick));
                             memcpy(frame_buff, fix, sizeof(fix));
                             memcpy(frame_buff+sizeof(fix), sps, spsLen);
-                            flv_stream.ConvertH264((char*)frame_buff, spsLen + sizeof(fix), flv_video_timestamp);
+                            flv_stream.ConvertH264((char*)frame_buff, spsLen + sizeof(fix), dst);
 
                             memcpy(frame_buff+sizeof(fix), pps, ppslen);
-                            flv_stream.ConvertH264((char*)frame_buff, ppslen + sizeof(fix), flv_video_timestamp);
+                            flv_stream.ConvertH264((char*)frame_buff, ppslen + sizeof(fix), dst);
                             flv_init = true;
                         }
                     } while (0);
@@ -323,9 +329,8 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
                 if (flv_init) {
                     memcpy(frame_buff, fix, sizeof(fix));
                     memcpy(frame_buff + sizeof(fix), data + 9, size - 9);
-                    flv_stream.ConvertH264((char *)frame_buff, size - 9 + sizeof(fix), flv_video_timestamp);
+                    flv_stream.ConvertH264((char *)frame_buff, size - 9 + sizeof(fix), dst);
                     // flv_video_timestamp += 1000 / framerate;
-                    flv_video_timestamp += 29;
                     // debug("flv_video_timestamp:%u", flv_video_timestamp);
                 }
                 do {
@@ -369,6 +374,7 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
             debug("timeout recv stream exit....");
             break;
         }
+        flv_pre_time = flv_curr_time;
     }
 
     mp4_encode.FileClose();
