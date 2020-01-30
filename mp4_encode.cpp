@@ -1,6 +1,6 @@
 #include "string.h"
 #include "mp4_encode.h"
-#include "flvparse.h"
+#include "mediaparse.h"
 
 CMp4Encode::CMp4Encode(void):
     m_bfindSps(false),

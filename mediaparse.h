@@ -1,5 +1,5 @@
-#ifndef FLVPARSE_H
-#define FLVPARSE_H
+#ifndef MEDIAPARSE_H
+#define MEDIAPARSE_H
 
 #include <stdio.h>
 #include <unistd.h>

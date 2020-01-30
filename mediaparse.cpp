@@ -1,4 +1,4 @@
-#include "flvparse.h"
+#include "mediaparse.h"
 
 int sampleRates[] = {96000,
                      88200, 64000, 48000, 44100, 32000, 24000,
