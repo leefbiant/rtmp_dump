@@ -1,12 +1,10 @@
 #include <iostream>
-
 using namespace std;
+#include "flvdump.h"
 
-#include "converter.h"
-
-namespace Cnvt
+namespace flvdump
 {
-	CConverter::CConverter()
+	CFlvDump::CFlvDump()
 	{
 		_pSPS = NULL;
 		_pPPS = NULL;
@@ -24,7 +22,7 @@ namespace Cnvt
 		_bWriteAACSeqHeader = 0;
 	}
 
-	CConverter::~CConverter() {
+	CFlvDump::~CFlvDump() {
 		Close();
 		if (_pAudioSpecificConfig) {
 			delete[] _pAudioSpecificConfig;
@@ -32,7 +30,7 @@ namespace Cnvt
 		}
 	}
 
-	int CConverter::Open(std::string strFlvFile, int bHaveAudio, int bHaveVideo)
+	int CFlvDump::Open(std::string strFlvFile, int bHaveAudio, int bHaveVideo)
 	{
 		_fileOut.open(strFlvFile.c_str(), std::ios_base::out | std::ios_base::binary);
 		if (!_fileOut)
@@ -46,7 +44,7 @@ namespace Cnvt
 		return 1;
 	}
 
-	int CConverter::Close()
+	int CFlvDump::Close()
 	{
 		if (_pSPS != NULL) {
 			delete _pSPS;
@@ -66,7 +64,7 @@ namespace Cnvt
 		return 1;
 	}
 
-	int CConverter::ConvertH264(char *pNalu, int nNaluSize, unsigned int nTimeStamp)
+	int CFlvDump::ConvertH264(char *pNalu, int nNaluSize, unsigned int nTimeStamp)
 	{
 		_nVideoTimeStamp = nTimeStamp;
 
@@ -99,7 +97,7 @@ namespace Cnvt
 		return 1;
 	}
 
-	void CConverter::MakeFlvHeader(unsigned char *pFlvHeader)
+	void CFlvDump::MakeFlvHeader(unsigned char *pFlvHeader)
 	{
 		pFlvHeader[0] = 'F';
 		pFlvHeader[1] = 'L';
@@ -118,7 +116,7 @@ namespace Cnvt
 		_fileOut.write((char *)_FlvHeader, 9);
 	}
 
-	void CConverter::WriteH264Header(unsigned int nTimeStamp)
+	void CFlvDump::WriteH264Header(unsigned int nTimeStamp)
 	{
 		u4 prev_u4(_nPrevTagSize);
 		_fileOut.write((char *)prev_u4._u, 4);
@@ -166,7 +164,7 @@ namespace Cnvt
 		_nPrevTagSize = 11 + nDataSize;
 	}
 
-	void CConverter::WriteH264Frame(char *pNalu, int nNaluSize, unsigned int nTimeStamp)
+	void CFlvDump::WriteH264Frame(char *pNalu, int nNaluSize, unsigned int nTimeStamp)
 	{
 		int nNaluType = pNalu[4] & 0x1f;
 		if (nNaluType == 7 || nNaluType == 8)
@@ -203,7 +201,7 @@ namespace Cnvt
 		_nPrevTagSize = 11 + nDataSize;
 	}
 
-	void CConverter::WriteH264EndofSeq()
+	void CFlvDump::WriteH264EndofSeq()
 	{
 		u4 prev_u4(_nPrevTagSize);
 		Write(prev_u4);
@@ -227,7 +225,7 @@ namespace Cnvt
 		Write(com_time_u3);
 	}
 
-	int CConverter::ConvertAAC(char *pAAC, int nAACFrameSize, unsigned int nTimeStamp)
+	int CFlvDump::ConvertAAC(char *pAAC, int nAACFrameSize, unsigned int nTimeStamp)
 	{
 		if (pAAC == NULL || nAACFrameSize <= 7)
 			return 0;
@@ -258,7 +256,7 @@ namespace Cnvt
 		return 1;
 	}
 
-	void CConverter::WriteAACHeader(unsigned int nTimeStamp)
+	void CFlvDump::WriteAACHeader(unsigned int nTimeStamp)
 	{
 		u4 prev_u4(_nPrevTagSize);
 		_fileOut.write((char *)prev_u4._u, 4);
@@ -289,7 +287,7 @@ namespace Cnvt
 		_nPrevTagSize = 11 + nDataSize;
 	}
 
-	void CConverter::WriteAACFrame(char *pFrame, int nFrameSize, unsigned int nTimeStamp)
+	void CFlvDump::WriteAACFrame(char *pFrame, int nFrameSize, unsigned int nTimeStamp)
 	{
 		u4 prev_u4(_nPrevTagSize);
 		Write(prev_u4);

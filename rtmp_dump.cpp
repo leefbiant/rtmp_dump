@@ -21,10 +21,10 @@ Last Modified       : 2019-12-28 22:59:02
 #include "mp4_encode.h"
 #include "mp4_encode.h"
 
-#include "converter.h"
+#include "flvdump.h"
 
 using namespace std;
-using namespace Cnvt;
+using namespace flvdump;
 
 
 void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file, const char* opus_file) {
@@ -99,7 +99,7 @@ void RtmpDump(const char* rtmp_url, const char* h264_file, const char* aac_file,
     SPS h264_sps_context;
 
     // flv
-    CConverter flv_stream;
+    CFlvDump flv_stream;
     uint64_t flv_curr_time = 0;
     uint64_t flv_pre_time = 0;
     uint64_t dst = 0;

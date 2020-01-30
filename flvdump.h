@@ -4,7 +4,7 @@
 #include <fstream>
 #include <string.h>
 
-namespace Cnvt
+namespace flvdump
 {
 	class u4
 	{
@@ -31,11 +31,11 @@ namespace Cnvt
 		unsigned char _u[2];
 	};
 
-	class CConverter
+	class CFlvDump
 	{
 	public:
-		CConverter();
-		virtual ~CConverter();
+		CFlvDump();
+		virtual ~CFlvDump();
 
 		int Open(std::string strFlvFile, int bHaveAudio=0, int bHaveVideo=1);
 		int Close();
